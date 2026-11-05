@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
+import zipfile
 import openpyxl
+from openpyxl.utils.exceptions import InvalidFileException
 
 
 @dataclass
@@ -66,7 +68,12 @@ def _deduplicate_headers(raw_headers: list[str]) -> list[str]:
 
 def _load_xlsx(path: Path) -> SpreadsheetData:
     """Loads an Excel .xlsx file using openpyxl with data_only=True."""
-    wb = openpyxl.load_workbook(filename=str(path), read_only=True, data_only=True)
+    try:
+        wb = openpyxl.load_workbook(filename=str(path), read_only=True, data_only=True)
+    except (zipfile.BadZipFile, InvalidFileException, OSError, KeyError, ValueError) as exc:
+        raise SpreadsheetLoadError(
+            f"Invalid or corrupted Excel (.xlsx) workbook '{path.name}': {exc}"
+        ) from exc
     try:
         sheet = wb.active
         if sheet is None:
@@ -184,3 +191,4 @@ def load_spreadsheet(file_path: str) -> SpreadsheetData:
     raise SpreadsheetLoadError(
         f"Unsupported spreadsheet extension '{ext}'. Please provide an .xlsx or .csv file."
     )
+

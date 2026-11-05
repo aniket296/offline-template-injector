@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import math
 from pathlib import Path
 from typing import Optional
 import warnings
@@ -63,6 +64,31 @@ def open_template_as_pdf_bytes(template_path: str) -> bytes:
     )
 
 
+def _lookup_mapped_value(field: FieldNode, record: dict[str, str]) -> str:
+    """Finds the column value in record (with case-insensitive fallback)."""
+    col = field.mapped_column
+    if not col:
+        return ""
+    if col in record:
+        return str(record[col]).strip()
+    col_lower = col.lower()
+    for k, v in record.items():
+        if k.lower() == col_lower:
+            return str(v).strip()
+    return ""
+
+
+def _resolve_placeholder_value(field: FieldNode) -> str:
+    """Returns a placeholder string for canvas preview when no record is active."""
+    if field.field_type == FieldType.IMAGE:
+        return field.static_value
+    if field.field_type == FieldType.QR:
+        return field.static_value or f"QR:{field.mapped_column or field.label}"
+    if field.mapped_column:
+        return f"{field.static_value or ''}{{{field.mapped_column}}}"
+    return field.static_value or f"{{{field.label}}}"
+
+
 def _resolve_field_value(
     field: FieldNode,
     record: Optional[dict[str, str]],
@@ -70,45 +96,26 @@ def _resolve_field_value(
 ) -> str:
     """Resolves the string value or file path for a FieldNode from a record or static fallback."""
     if record is not None:
-        mapped_val = ""
-        if field.mapped_column and field.mapped_column in record:
-            mapped_val = str(record[field.mapped_column]).strip()
-        elif field.mapped_column:
-            col_lower = field.mapped_column.lower()
-            for k, v in record.items():
-                if k.lower() == col_lower:
-                    mapped_val = str(v).strip()
-                    break
-
-        if field.field_type == FieldType.TEXT:
-            if mapped_val and field.static_value:
-                return f"{field.static_value}{mapped_val}"
-            return mapped_val if mapped_val else field.static_value
+        mapped_val = _lookup_mapped_value(field, record)
         if field.field_type == FieldType.IMAGE:
-            return mapped_val if mapped_val else field.static_value
-        if field.field_type == FieldType.QR:
-            if mapped_val and field.static_value:
-                return f"{field.static_value}{mapped_val}"
-            return mapped_val if mapped_val else field.static_value
+            return mapped_val or field.static_value
+        if mapped_val and field.static_value:
+            return f"{field.static_value}{mapped_val}"
+        return mapped_val or field.static_value
 
     if use_placeholder_when_no_record:
-        if field.field_type == FieldType.TEXT:
-            if field.mapped_column:
-                prefix = field.static_value or ""
-                return f"{prefix}{{{field.mapped_column}}}"
-            if field.static_value:
-                return field.static_value
-            return f"{{{field.label}}}"
-        if field.field_type == FieldType.IMAGE:
-            return field.static_value
-        if field.field_type == FieldType.QR:
-            if field.static_value:
-                return field.static_value
-            if field.mapped_column:
-                return f"QR:{field.mapped_column}"
-            return f"QR:{field.label}"
+        return _resolve_placeholder_value(field)
 
     return field.static_value
+
+
+def _safe_field_rect(field: FieldNode) -> fitz.Rect:
+    """Builds a validated finite, non-empty fitz.Rect for a FieldNode."""
+    x = field.x if math.isfinite(field.x) and field.x >= 0.0 else 0.0
+    y = field.y if math.isfinite(field.y) and field.y >= 0.0 else 0.0
+    w = field.width if math.isfinite(field.width) and field.width >= 10.0 else 10.0
+    h = field.height if math.isfinite(field.height) and field.height >= 8.0 else 8.0
+    return fitz.Rect(x, y, x + w, y + h)
 
 
 def _stamp_text_field(page: fitz.Page, field: FieldNode, text_value: str) -> None:
@@ -163,7 +170,7 @@ def _stamp_image_field(page: fitz.Page, field: FieldNode, image_path_str: str) -
     if not img_path.exists() or not img_path.is_file():
         return
 
-    rect = fitz.Rect(field.x, field.y, field.x + field.width, field.y + field.height)
+    rect = _safe_field_rect(field)
     with Image.open(img_path) as pil_img:
         rgba = pil_img.convert("RGBA")
         buf = io.BytesIO()
@@ -177,7 +184,7 @@ def _stamp_qr_field(page: fitz.Page, field: FieldNode, payload: str) -> None:
     """Generates a QR code for payload and stamps it into the field bounding rectangle."""
     if not payload:
         return
-    rect = fitz.Rect(field.x, field.y, field.x + field.width, field.y + field.height)
+    rect = _safe_field_rect(field)
     qr_bytes = generate_qr_png_bytes(payload=payload, box_size=8, border=1)
     page.insert_image(rect, stream=qr_bytes, keep_proportion=True)
 
@@ -244,3 +251,4 @@ def render_canvas_preview(
         return img
     finally:
         doc.close()
+

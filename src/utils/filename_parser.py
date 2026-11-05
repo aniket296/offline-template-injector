@@ -22,6 +22,26 @@ def sanitize_filename_segment(text: str) -> str:
     return cleaned
 
 
+def _resolve_placeholder_token(
+    key: str,
+    record: dict[str, str],
+    padded_index: str,
+    first_col_val: str,
+) -> str:
+    """Resolves a single {Token} placeholder against built-in tags and record keys."""
+    if key in ("Index", "Row_Index", "index", "row_index"):
+        return padded_index
+    if key in ("Column0", "First_Column", "column0", "first_column"):
+        return sanitize_filename_segment(first_col_val) or f"Record_{padded_index}"
+    if key in record:
+        return sanitize_filename_segment(record[key]) or "NA"
+    key_lower = key.lower()
+    for col_name, col_val in record.items():
+        if col_name.lower() == key_lower:
+            return sanitize_filename_segment(col_val) or "NA"
+    return sanitize_filename_segment(key)
+
+
 def format_dynamic_filename(
     pattern: str,
     record: dict[str, str],
@@ -43,28 +63,12 @@ def format_dynamic_filename(
         first_key = next(iter(record.keys()))
         first_col_val = str(record.get(first_key, "")).strip()
 
-    effective_pattern = (pattern or "").strip()
-    if not effective_pattern:
-        effective_pattern = "{Index}_{Column0}"
+    effective_pattern = (pattern or "").strip() or "{Index}_{Column0}"
 
-    def _replace_token(match: re.Match[str]) -> str:
-        key = match.group(1).strip()
-        if key in ("Index", "Row_Index", "index", "row_index"):
-            return padded_index
-        if key in ("Column0", "First_Column", "column0", "first_column"):
-            return sanitize_filename_segment(first_col_val) or f"Record_{padded_index}"
-        if key in record:
-            val = sanitize_filename_segment(record[key])
-            return val if val else "NA"
-        # Case-insensitive fallback lookup
-        key_lower = key.lower()
-        for col_name, col_val in record.items():
-            if col_name.lower() == key_lower:
-                val = sanitize_filename_segment(col_val)
-                return val if val else "NA"
-        return sanitize_filename_segment(key)
-
-    rendered = _PLACEHOLDER_PATTERN.sub(_replace_token, effective_pattern)
+    rendered = _PLACEHOLDER_PATTERN.sub(
+        lambda m: _resolve_placeholder_token(m.group(1).strip(), record, padded_index, first_col_val),
+        effective_pattern,
+    )
     # Remove any stray braces
     rendered = rendered.replace("{", "").replace("}", "")
     rendered = sanitize_filename_segment(rendered)
@@ -74,6 +78,9 @@ def format_dynamic_filename(
         stem = rendered[:-4].strip(" .")
     else:
         stem = rendered
+
+    if len(stem) > 180:
+        stem = stem[:180].rstrip(" ._")
 
     if not stem or stem.upper() in _RESERVED_WIN_NAMES:
         stem = f"{padded_index}_Document"
@@ -90,3 +97,4 @@ def format_dynamic_filename(
             counter += 1
 
     return filename
+

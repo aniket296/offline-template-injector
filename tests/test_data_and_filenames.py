@@ -65,3 +65,24 @@ def test_format_dynamic_filename_replaces_columns_and_scrubs_illegal_chars(tmp_p
 def test_sanitize_filename_segment_trims_dots_and_spaces() -> None:
     """Verifies trailing dots and spaces are stripped for Windows safety."""
     assert sanitize_filename_segment("  Report Card... ") == "Report Card"
+
+
+def test_corrupt_xlsx_raises_spreadsheet_load_error(tmp_path: Path) -> None:
+    """Regression test (DEF-04): corrupt non-ZIP .xlsx files raise SpreadsheetLoadError."""
+    bad_xlsx = tmp_path / "corrupt.xlsx"
+    bad_xlsx.write_bytes(b"PK\x03\x04corrupted_payload_bytes")
+    with pytest.raises(SpreadsheetLoadError, match="Invalid or corrupted Excel"):
+        load_spreadsheet(str(bad_xlsx))
+
+
+def test_format_dynamic_filename_caps_excessive_length_and_reserved_names() -> None:
+    """Regression test (DEF-05): filenames > 180 chars are capped and Windows reserved names are guarded."""
+    huge_record = {"Name": "A" * 350}
+    fn = format_dynamic_filename("{Index}_{Name}", huge_record, row_index=0)
+    assert len(fn) <= 185
+    assert fn.endswith(".pdf")
+
+    reserved_fn = format_dynamic_filename("CON", {}, row_index=0)
+    assert reserved_fn == "001_Document.pdf"
+
+

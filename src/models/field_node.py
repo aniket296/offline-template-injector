@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import math
 from typing import Any
 
 
@@ -76,7 +77,17 @@ class FieldNode:
         field_type = FieldType(raw_type) if not isinstance(raw_type, FieldType) else raw_type
 
         raw_align = data.get("alignment", TextAlignment.CENTER.value)
-        alignment = TextAlignment(raw_align) if not isinstance(raw_align, TextAlignment) else raw_align
+        alignment = TextAlignment(raw_align) if not isinstance(raw_align, FieldType) and not isinstance(raw_align, TextAlignment) else raw_align
+
+        x_val = float(data.get("x", 0.0))
+        y_val = float(data.get("y", 0.0))
+        w_val = float(data.get("width", 180.0))
+        h_val = float(data.get("height", 36.0))
+        if not all(math.isfinite(v) for v in (x_val, y_val, w_val, h_val)):
+            raise ValueError("FieldNode coordinates (x, y, width, height) must be finite numbers.")
+
+        font_sz = max(4, min(144, int(data.get("font_size", 14))))
+        min_font_sz = max(4, min(font_sz, int(data.get("min_font_size", 6))))
 
         return cls(
             field_id=str(data["field_id"]),
@@ -84,18 +95,18 @@ class FieldNode:
             label=str(data.get("label", "Field")),
             mapped_column=str(data.get("mapped_column", "")),
             static_value=str(data.get("static_value", "")),
-            x=float(data.get("x", 0.0)),
-            y=float(data.get("y", 0.0)),
-            width=float(data.get("width", 180.0)),
-            height=float(data.get("height", 36.0)),
+            x=max(0.0, x_val),
+            y=max(0.0, y_val),
+            width=max(10.0, w_val),
+            height=max(8.0, h_val),
             font_family=str(data.get("font_family", "helv")),
-            font_size=int(data.get("font_size", 14)),
-            min_font_size=int(data.get("min_font_size", 6)),
+            font_size=font_sz,
+            min_font_size=min_font_sz,
             auto_shrink=bool(data.get("auto_shrink", True)),
             bold=bool(data.get("bold", False)),
             italic=bool(data.get("italic", False)),
             color_hex=str(data.get("color_hex", "#1E293B")),
             alignment=alignment,
-            page_index=int(data.get("page_index", 0)),
+            page_index=max(0, int(data.get("page_index", 0))),
         )
 

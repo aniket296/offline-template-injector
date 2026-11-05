@@ -39,7 +39,10 @@ class QueueLogHandler(logging.Handler):
 def get_log_file_path() -> Path:
     """Returns the path to ~/.offline_template_injector/app.log."""
     log_dir = Path.home() / ".offline_template_injector"
-    log_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
     return log_dir / "app.log"
 
 
@@ -95,3 +98,4 @@ def get_logger(module_name: Optional[str] = None) -> logging.Logger:
     if module_name:
         return base.getChild(module_name)
     return base
+

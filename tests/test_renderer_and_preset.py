@@ -11,14 +11,17 @@ with warnings.catch_warnings():
 
 from src.core.batch_worker import TemplateBatchWorker
 from src.core.data_loader import load_spreadsheet
-from src.core.project_io import load_project_preset, save_project_preset
+from src.core.project_io import PresetIOError, load_project_preset, save_project_preset
 from src.core.template_renderer import (
     open_template_as_pdf_bytes,
     render_canvas_preview,
     render_record_to_doc,
 )
+from src.models.batch_result import RowStatus
 from src.models.field_node import FieldNode, FieldType, TextAlignment
 from src.models.project_state import ExportMode, OutputSettings, TemplateProject
+from src.utils.config import get_app_log_level, get_default_output_pattern, get_max_worker_threads
+from src.utils.logger import get_log_file_path, get_log_queue, get_logger
 
 
 def test_stamp_text_signature_and_qr_onto_pdf_template(
@@ -234,3 +237,117 @@ def test_batch_worker_generates_individual_and_merged_master_pdfs(
         assert "Diya Patel" in merged_doc[1].get_text()
     finally:
         merged_doc.close()
+
+
+def test_merged_filename_path_traversal_is_blocked(
+    tmp_path: Path,
+    sample_pdf_template: Path,
+    sample_xlsx_gradebook: Path,
+) -> None:
+    """Regression test (DEF-01): merged_filename with '../' cannot escape output_dir."""
+    spreadsheet = load_spreadsheet(str(sample_xlsx_gradebook))
+    nested_out = tmp_path / "safe_zone" / "exports"
+    escaped_file = tmp_path / "safe_zone" / "pwned_master.pdf"
+
+    settings = OutputSettings(
+        output_dir=str(nested_out),
+        filename_pattern="{Roll_No}",
+        export_mode=ExportMode.MERGED_MASTER_PDF,
+        merged_filename="../../pwned_master.pdf",
+    )
+    fields = [
+        FieldNode("f1", FieldType.TEXT, "Name", "Student_Name", 100.0, 200.0),
+    ]
+    worker = TemplateBatchWorker(
+        template_path=str(sample_pdf_template),
+        spreadsheet=spreadsheet,
+        fields=fields,
+        output_settings=settings,
+    )
+    summary = worker.run()
+    assert not escaped_file.exists()
+    assert summary.merged_pdf_path is not None
+    assert Path(summary.merged_pdf_path).resolve().parent == nested_out.resolve()
+
+
+def test_preset_rejects_non_finite_coordinates_and_clamps_negative_bounds(
+    tmp_path: Path,
+    sample_pdf_template: Path,
+) -> None:
+    """Regression test (DEF-02): NaN/Inf in .otvi raises PresetIOError and negative sizes clamp safely."""
+    import pytest
+
+    bad_preset = tmp_path / "inf_coords.otvi"
+    bad_preset.write_text(
+        '{"fields": [{"field_id": "f1", "field_type": "TEXT", "x": 1e309, "y": 10}]}',
+        encoding="utf-8",
+    )
+    with pytest.raises(PresetIOError):
+        load_project_preset(str(bad_preset))
+
+    neg_field = FieldNode.from_dict(
+        {"field_id": "f2", "field_type": "IMAGE", "x": -25.0, "y": -10.0, "width": -100.0, "height": 0.0}
+    )
+    assert neg_field.x == 0.0
+    assert neg_field.y == 0.0
+    assert neg_field.width >= 10.0
+    assert neg_field.height >= 8.0
+
+    pdf_bytes = open_template_as_pdf_bytes(str(sample_pdf_template))
+    doc = render_record_to_doc(pdf_bytes, [neg_field], {})
+    doc.close()
+
+
+def test_batch_worker_cancellation_and_placeholder_canvas_preview(
+    tmp_path: Path,
+    sample_pdf_template: Path,
+    sample_xlsx_gradebook: Path,
+) -> None:
+    """Verifies thread-safe cancellation in TemplateBatchWorker and placeholder preview rendering."""
+    spreadsheet = load_spreadsheet(str(sample_xlsx_gradebook))
+    fields = [
+        FieldNode("f1", FieldType.TEXT, "Name", "Student_Name", 80.0, 120.0, static_value="Name: "),
+        FieldNode("f2", FieldType.QR, "Verify", "Verification_ID", 80.0, 200.0),
+        FieldNode("f3", FieldType.IMAGE, "Seal", "", 80.0, 300.0, static_value="nonexistent.png"),
+    ]
+    pdf_bytes = open_template_as_pdf_bytes(str(sample_pdf_template))
+    placeholder_img = render_canvas_preview(pdf_bytes, fields, record=None, page_index=0, zoom=0.8)
+    assert placeholder_img.width > 100
+
+    settings = OutputSettings(
+        output_dir=str(tmp_path / "cancel_out"),
+        filename_pattern="{Index}_{Student_Name}",
+        export_mode=ExportMode.INDIVIDUAL_PDFS,
+    )
+    worker = TemplateBatchWorker(
+        template_path=str(sample_pdf_template),
+        spreadsheet=spreadsheet,
+        fields=fields,
+        output_settings=settings,
+    )
+    worker.cancel()
+    summary = worker.run()
+    assert summary.failed == 3
+    assert all(r.status == RowStatus.FAILED and r.error_message == "Cancelled by user" for r in summary.results)
+    assert summary.to_dict()["failed"] == 3
+
+
+def test_config_and_logger_helpers(tmp_path: Path) -> None:
+    """Verifies config getters, logger queue, and corrupt JSON preset error handling."""
+    import pytest
+
+    assert get_app_log_level() in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+    assert len(get_default_output_pattern()) > 0
+    assert 1 <= get_max_worker_threads() <= 32
+    assert get_log_file_path().name == "app.log"
+    log = get_logger("unit_test")
+    log.info("Test log line")
+    assert not get_log_queue().empty()
+
+    malformed_json = tmp_path / "broken.otvi"
+    malformed_json.write_text("{not_valid_json", encoding="utf-8")
+    with pytest.raises(PresetIOError, match="Invalid JSON"):
+        load_project_preset(str(malformed_json))
+
+
+

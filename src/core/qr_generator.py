@@ -8,9 +8,14 @@ import qrcode
 from qrcode.constants import ERROR_CORRECT_M
 
 
+MAX_QR_PAYLOAD_CHARS = 1800
+
+
 def generate_qr_png_bytes(payload: str, box_size: int = 8, border: int = 1) -> bytes:
     """Generates a crisp, high-contrast QR code PNG byte stream in memory."""
     effective_payload = str(payload).strip() if payload else "UNSPECIFIED"
+    if len(effective_payload) > MAX_QR_PAYLOAD_CHARS:
+        effective_payload = effective_payload[:MAX_QR_PAYLOAD_CHARS]
 
     qr = qrcode.QRCode(
         version=None,
@@ -35,3 +40,4 @@ def generate_qr_png_bytes(payload: str, box_size: int = 8, border: int = 1) -> b
     out_buf = io.BytesIO()
     pil_img.save(out_buf, format="PNG", optimize=True)
     return out_buf.getvalue()
+

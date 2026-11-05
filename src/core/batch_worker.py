@@ -19,7 +19,7 @@ from src.models.batch_result import BatchSummary, RowStatus, RowTaskResult
 from src.models.field_node import FieldNode
 from src.models.project_state import ExportMode, OutputSettings
 from src.utils.config import get_max_worker_threads
-from src.utils.filename_parser import format_dynamic_filename
+from src.utils.filename_parser import format_dynamic_filename, sanitize_filename_segment
 from src.utils.logger import get_logger
 
 logger = get_logger("batch_worker")
@@ -201,24 +201,7 @@ class TemplateBatchWorker:
 
         merged_pdf_path: Optional[str] = None
         if write_merged and succeeded > 0 and not self.cancel_event.is_set():
-            merged_name = (self.output_settings.merged_filename or "Master_Batch_Output.pdf").strip()
-            if not merged_name.lower().endswith(".pdf"):
-                merged_name = f"{merged_name}.pdf"
-            merged_target = out_dir / merged_name
-
-            master_doc = fitz.open()
-            try:
-                for i in sorted(pdf_bytes_by_index.keys()):
-                    single_doc = fitz.open(stream=pdf_bytes_by_index[i], filetype="pdf")
-                    try:
-                        master_doc.insert_pdf(single_doc)
-                    finally:
-                        single_doc.close()
-                master_doc.save(str(merged_target), garbage=3, deflate=True)
-                merged_pdf_path = str(merged_target)
-                logger.info("Saved merged master PDF at: %s", merged_pdf_path)
-            finally:
-                master_doc.close()
+            merged_pdf_path = self._write_merged_master_pdf(out_dir, pdf_bytes_by_index)
 
         summary = BatchSummary(
             total_rows=total_rows,
@@ -235,3 +218,34 @@ class TemplateBatchWorker:
                 logger.warning("Batch finished callback error: %s", cb_exc)
 
         return summary
+
+    def _write_merged_master_pdf(
+        self,
+        out_dir: Path,
+        pdf_bytes_by_index: dict[int, bytes],
+    ) -> str:
+        """Assembles all rendered row pages in order into a single multi-page master PDF inside out_dir."""
+        raw_merged = Path(self.output_settings.merged_filename or "Master_Batch_Output.pdf").name
+        merged_name = sanitize_filename_segment(raw_merged) or "Master_Batch_Output.pdf"
+        if not merged_name.lower().endswith(".pdf"):
+            merged_name = f"{merged_name}.pdf"
+        if merged_name[:-4].strip(" .") == "":
+            merged_name = "Master_Batch_Output.pdf"
+        merged_target = (out_dir / merged_name).resolve()
+        if merged_target.parent != out_dir.resolve():
+            merged_target = out_dir.resolve() / "Master_Batch_Output.pdf"
+
+        master_doc = fitz.open()
+        try:
+            for i in sorted(pdf_bytes_by_index.keys()):
+                single_doc = fitz.open(stream=pdf_bytes_by_index[i], filetype="pdf")
+                try:
+                    master_doc.insert_pdf(single_doc)
+                finally:
+                    single_doc.close()
+            master_doc.save(str(merged_target), garbage=3, deflate=True)
+            logger.info("Saved merged master PDF at: %s", merged_target)
+            return str(merged_target)
+        finally:
+            master_doc.close()
+

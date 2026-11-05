@@ -76,3 +76,12 @@ def test_generate_qr_png_bytes_produces_valid_png_image() -> None:
         assert img.width > 32
         assert img.height > 32
         assert img.width == img.height
+
+
+def test_generate_qr_png_bytes_truncates_oversized_payload_gracefully() -> None:
+    """Regression test (DEF-03): payloads exceeding QR v40 capacity (>2953 bytes) are truncated cleanly."""
+    oversized = "VERIFY-" + ("X" * 5000)
+    png_bytes = generate_qr_png_bytes(oversized)
+    assert png_bytes.startswith(b"\x89PNG\r\n\x1a\n")
+
+
