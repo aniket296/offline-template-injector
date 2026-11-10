@@ -9,8 +9,9 @@ import time
 from typing import Callable, Optional
 import warnings
 
-with warnings.catch_warnings():
-    warnings.simplefilter("ignore", FutureWarning)
+try:
+    import pymupdf as fitz
+except ImportError:
     import fitz
 
 from src.core.data_loader import SpreadsheetData

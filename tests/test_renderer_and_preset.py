@@ -5,8 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 import warnings
 
-with warnings.catch_warnings():
-    warnings.simplefilter("ignore", FutureWarning)
+try:
+    import pymupdf as fitz
+except ImportError:
     import fitz
 
 from src.core.batch_worker import TemplateBatchWorker

@@ -10,8 +10,9 @@ import warnings
 
 from PIL import Image
 
-with warnings.catch_warnings():
-    warnings.simplefilter("ignore", FutureWarning)
+try:
+    import pymupdf as fitz
+except ImportError:
     import fitz
 
 from src.core.qr_generator import generate_qr_png_bytes
