@@ -86,3 +86,22 @@ def test_format_dynamic_filename_caps_excessive_length_and_reserved_names() -> N
     assert reserved_fn == "001_Document.pdf"
 
 
+def test_format_dynamic_filename_tokens_and_case_insensitivity(tmp_path: Path) -> None:
+    """Verifies {Column0}, {First_Column}, case-insensitivity, and sequential collisions."""
+    rec = {"Student_ID": "S-999", "score": "100"}
+
+    # Test Column0 / First_Column
+    fn1 = format_dynamic_filename("{Index}_{Column0}", rec, row_index=4)
+    assert fn1 == "005_S-999.pdf"
+
+    fn2 = format_dynamic_filename("{First_Column}_{SCORE}", rec, row_index=0)
+    assert fn2 == "S-999_100.pdf"
+
+    # Test sequential collision resolution (_1, _2)
+    (tmp_path / "Cert_1.pdf").write_bytes(b"%PDF")
+    (tmp_path / "Cert_1_1.pdf").write_bytes(b"%PDF")
+    fn_collision = format_dynamic_filename("Cert_1", rec, row_index=0, target_dir=tmp_path)
+    assert fn_collision == "Cert_1_2.pdf"
+
+
+
