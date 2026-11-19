@@ -1,0 +1,94 @@
+name: CI & Windows Release Packaging
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - "v*"
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Unit & Integration Tests
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Automated Unit Tests
+        run: |
+          pytest -v
+
+  build-windows:
+    name: Build Standalone EXE & Inno Setup Installer
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Inno Setup 6
+        run: choco install innosetup --no-progress
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Automated Installer Build Pipeline
+        run: |
+          scripts\build_installer.bat
+        shell: cmd
+
+      - name: Verify Generated Binaries
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist\OfflineTemplateInjector.exe")) {
+            throw "dist\OfflineTemplateInjector.exe was not generated!"
+          }
+          if (-not (Test-Path "dist_installer\OfflineTemplateInjector_Setup.exe")) {
+            throw "dist_installer\OfflineTemplateInjector_Setup.exe was not generated!"
+          }
+          Write-Host "Both standalone binary and setup wizard verified successfully."
+
+      - name: Upload Standalone Executable Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OfflineTemplateInjector-Standalone
+          path: dist/OfflineTemplateInjector.exe
+
+      - name: Upload Installer Wizard Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OfflineTemplateInjector-Setup
+          path: dist_installer/OfflineTemplateInjector_Setup.exe
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/OfflineTemplateInjector.exe
+            dist_installer/OfflineTemplateInjector_Setup.exe
+          generate_release_notes: true

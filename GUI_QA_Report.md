@@ -309,7 +309,7 @@ The following environmental observations are documented for operational transpar
 
 ### 12.1 Completed & Near-Term Polish Actions
 1. **Migration to `import pymupdf as fitz` [COMPLETED]:** Proactively migrated all module imports across `src/core/`, `tests/`, and the QA test harness to eliminate PyMuPDF 3.x deprecation notices while preserving 100% backward compatibility.
-2. **CI/CD Inno Setup Action:** Add a GitHub Actions workflow step with `jrsoftware/inno-setup` action to compile `OfflineTemplateInjector_Setup.exe` automatically on release tag creation.
+2. **CI/CD Inno Setup & Release Pipeline [COMPLETED]:** Implemented automated GitHub Actions workflow (`.github/workflows/ci.yml`) on `windows-latest` installing Inno Setup 6 via Chocolatey, executing automated unit tests, and building both the standalone executable (`OfflineTemplateInjector.exe`) and setup wizard installer (`OfflineTemplateInjector_Setup.exe`) with automated release publishing on tag push.
 3. **Recent Files Menu:** Implement an MRU (Most Recently Used) list for recently opened templates and `.otvi` preset files in the top menu bar.
 
 ### 12.2 Formal Sign-Off
